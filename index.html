@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CYBER POOP: TOUCH FIXED</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@900&display=swap');
+        :root { --main-color: #0f0; --bg-color: #000; --accent-color: #ff0; --o2-color: #00bfff; }
+        [data-theme='amber'] { --main-color: #ffb000; --accent-color: #d883ff; }
+        [data-theme='white'] { --main-color: #e0e0e0; --accent-color: #ffffff; }
+
+        body { 
+            background: var(--bg-color); color: var(--main-color); 
+            font-family: 'Source Code Pro', monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            min-height: 100vh; margin: 0; overflow: hidden; touch-action: manipulation;
+            transition: color 0.3s ease;
+        }
+        .game-wrap { display: flex; flex-direction: column; align-items: center; gap: 15px; width: 100%; position: relative; }
+        
+        /* 실제 게임 조작 영역 */
+        .game-container { 
+            width: 85%; max-width: 380px; text-align: center; border: 2px solid var(--main-color); 
+            padding: 15px; position: relative; box-shadow: 0 0 15px var(--main-color); 
+            display: flex; flex-direction: column; gap: 5px; background: rgba(0,0,0,0.9);
+            z-index: 5;
+        }
+
+        #alert-zone { height: 50px; display: flex; align-items: center; justify-content: center; border-bottom: 1px dashed #333; pointer-events: none; }
+        #alert { font-size: 1.1rem; font-weight: bold; padding: 5px; border: 2px solid; display: none; width: 100%; }
+        #timer { font-size: 2.8rem; color: var(--accent-color); text-shadow: 0 0 10px var(--accent-color); margin: 5px 0; pointer-events: none; }
+        #visual-char { font-size: 13px; white-space: pre; height: 60px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+        
+        .bar-label { font-size: 10px; display: flex; justify-content: space-between; pointer-events: none; }
+        .bar-bg { width: 100%; height: 14px; border: 1px solid #333; background: #111; overflow: hidden; pointer-events: none; }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.1s linear; }
+        
+        #poop-fill { background: var(--main-color); }
+        #o2-fill { background: var(--o2-color); }
+
+        /* 랭킹 영역 - 클릭 이벤트 전파 방지 대상 */
+        .ranking-area { margin-top: 5px; font-size: 11px; border-top: 1px double var(--main-color); padding-top: 8px; position: relative; z-index: 10; }
+        .rank-title { 
+            color: var(--accent-color); cursor: pointer; text-decoration: underline; 
+            padding: 10px; display: block;
+        }
+        #rank-content { 
+            display: none; max-height: 120px; overflow-y: auto; margin-top: 5px;
+            background: rgba(20,20,20,0.95);
+        }
+        .rank-item { display: flex; justify-content: space-between; padding: 4px 5px; border-bottom: 1px solid #222; }
+
+        /* 컨트롤 영역 - 클릭 이벤트 전파 방지 대상 */
+        .controls { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; width: 100%; max-width: 400px; padding-bottom: 20px; z-index: 10; }
+        .btn { 
+            cursor: pointer; border: 1px solid var(--main-color); padding: 8px 15px; font-size: 11px;
+            background: #000; color: var(--main-color); font-family: inherit; font-weight: bold; transition: 0.2s;
+        }
+        .btn:active { background: var(--main-color); color: #000; }
+        .btn-retry { border-width: 2px; color: var(--accent-color); border-color: var(--accent-color); }
+        
+        .busted-bg { filter: invert(1) grayscale(1); }
+        .fainted-bg { filter: hue-rotate(180deg) brightness(0.5); }
+        .shake { animation: shake 0.05s infinite; }
+        @keyframes shake { 0% {transform: translate(1px, 1px);} 100% {transform: translate(-1px, -1px);} }
+    </style>
+</head>
+<body>
+
+<div class="game-wrap" id="game-wrap">
+    <div class="game-container" id="game-controller-area">
+        <div id="alert-zone"><div id="alert"></div></div>
+        <div id="timer">00:00.00</div>
+        <div id="visual-char"></div>
+        <div class="bar-label"><span>PROGRESS</span><span id="p-val">0%</span></div>
+        <div class="bar-bg"><div id="poop-fill" class="bar-fill"></div></div>
+        <div class="bar-label"><span>OXYGEN</span><span id="o-val">100%</span></div>
+        <div class="bar-bg"><div id="o2-fill" class="bar-fill"></div></div>
+        
+        <div class="ranking-area" id="ranking-area">
+            <div class="rank-title" id="rank-toggle">[ HALL OF FAME ] ▾</div>
+            <div id="rank-content"><div id="rank-list"></div></div>
+        </div>
+    </div>
+
+    <div class="controls" id="controls-area">
+        <button class="btn btn-retry" id="btn-retry">RETRY [R]</button>
+        <button class="btn" onclick="setTheme('green')">GREEN</button>
+        <button class="btn" onclick="setTheme('amber')">AMBER</button>
+        <button class="btn" onclick="setTheme('white')">WHITE</button>
+    </div>
+</div>
+
+<script>
+    let pressure = 0, oxygen = 100, time = 0;
+    let isPressing = false, isKnocking = false;
+    let gameState = 'ready', eventTriggered = false;
+    let clock, eventTimeout;
+
+    const pFill = document.getElementById('poop-fill'), oFill = document.getElementById('o2-fill');
+    const timerDisp = document.getElementById('timer'), alertDiv = document.getElementById('alert');
+    const charDiv = document.getElementById('visual-char'), gameWrap = document.getElementById('game-wrap');
+    
+    const faces = {
+        ready: "(  -_- )\n  /|  |\\",
+        pushing: "(  >_< ) ;\n  /|~~|\\",
+        holding: "(  O_O ) !!\n  /|  |\\",
+        busted: "(  X_X ) !!!\n  /|  |\\",
+        fainted: "( @__@ ) zzZ\n  /|  |\\",
+        win: "(  ^0^ ) /\n  /|  |\\"
+    };
+
+    charDiv.innerText = faces.ready;
+
+    function setTheme(theme) {
+        if (theme === 'green') document.documentElement.removeAttribute('data-theme');
+        else document.documentElement.setAttribute('data-theme', theme);
+    }
+
+    function difficulty() {
+        return Math.min(1.2, (pressure / 70 + time / 40) / 2);
+    }
+
+    const startAction = (e) => {
+        // 만약 터치된 타겟이 랭킹 영역이나 버튼 영역이면 게임 시작 안함
+        if (e.target.closest('.ranking-area') || e.target.closest('.controls')) return;
+        
+        if (e && e.cancelable) e.preventDefault();
+        if (gameState === 'over' || gameState === 'won') return;
+        if (gameState === 'ready') start();
+        isPressing = true;
+        if (isKnocking) gameOver("BUSTED");
+    };
+    const stopAction = () => isPressing = false;
+
+    // 조작 리스너
+    document.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') startAction(e);
+        if (e.code === 'KeyR') resetGame();
+    });
+    document.addEventListener('keyup', (e) => { if (e.code === 'Space') stopAction(); });
+
+    // 터치 조작 영역 제한
+    const controllerArea = document.getElementById('game-controller-area');
+    controllerArea.addEventListener('touchstart', startAction, { passive: false });
+    window.addEventListener('touchend', stopAction);
+
+    // 랭킹 및 버튼 영역에서 이벤트 전파 차단
+    const preventGameAction = (e) => {
+        e.stopPropagation(); // 이 터치 신호가 부모(게임 컨트롤러)에게 전달되는 것을 막음
+    };
+    
+    document.getElementById('ranking-area').addEventListener('touchstart', preventGameAction);
+    document.getElementById('controls-area').addEventListener('touchstart', preventGameAction);
+
+    function start() {
+        gameState = 'playing';
+        clock = setInterval(() => { time += 0.01; timerDisp.innerText = time.toFixed(2); }, 10);
+        loop();
+    }
+
+    function loop() {
+        if (gameState !== 'playing') return;
+        let diff = difficulty();
+        if (isPressing) {
+            let baseSpeed = 0.48, resistance = (pressure / 100) * 0.38;
+            pressure += (baseSpeed - resistance);
+            oxygen -= (1.05 + diff * 0.4);
+            charDiv.innerText = faces.pushing;
+            charDiv.classList.add('shake');
+        } else {
+            pressure -= 0.05; oxygen += (2.1 + diff * 0.5);
+            charDiv.innerText = isKnocking ? faces.holding : faces.ready;
+            charDiv.classList.remove('shake');
+        }
+        if (pressure >= 25 && !eventTriggered) { eventTriggered = true; scheduleEvent(true); }
+        if (oxygen <= 0) gameOver("FAINTED");
+        pressure = Math.max(0, pressure); oxygen = Math.min(100, oxygen);
+        pFill.style.width = pressure + '%'; oFill.style.width = oxygen + '%';
+        document.getElementById('p-val').innerText = Math.floor(pressure) + '%';
+        document.getElementById('o-val').innerText = Math.floor(oxygen) + '%';
+        if (pressure >= 100) win();
+        else requestAnimationFrame(loop);
+    }
+
+    function scheduleEvent(immediate = false) {
+        if (gameState !== 'playing') return;
+        let diff = difficulty();
+        let nextEventDelay = immediate ? 300 : (1500 - diff * 600 + Math.random() * (2000 - diff * 800));
+        eventTimeout = setTimeout(() => {
+            if (gameState !== 'playing') return;
+            alertDiv.innerText = "FOOTSTEPS: OK"; alertDiv.style.display = 'block';
+            alertDiv.style.color = "orange"; alertDiv.style.borderColor = "orange";
+            eventTimeout = setTimeout(() => {
+                if (gameState !== 'playing') return;
+                isKnocking = true;
+                alertDiv.innerText = "STOP: DANGER"; alertDiv.style.color = "red"; alertDiv.style.borderColor = "red";
+                if (isPressing) gameOver("BUSTED");
+                eventTimeout = setTimeout(() => {
+                    if (gameState !== 'playing') return;
+                    isKnocking = false; alertDiv.style.display = 'none';
+                    scheduleEvent(false);
+                }, 800 + diff * 900);
+            }, 800);
+        }, nextEventDelay);
+    }
+
+    function gameOver(reason) {
+        gameState = 'over'; clearInterval(clock); clearTimeout(eventTimeout);
+        alertDiv.style.display = "block";
+        if (reason === "FAINTED") {
+            gameWrap.classList.add('fainted-bg'); charDiv.innerText = faces.fainted;
+            alertDiv.innerText = "OXYGEN DEPLETED";
+            alertDiv.style.color = "var(--o2-color)"; alertDiv.style.borderColor = "var(--o2-color)";
+        } else {
+            gameWrap.classList.add('busted-bg'); charDiv.innerText = faces.busted;
+            alertDiv.innerText = "BUSTED / SOCIAL DEATH";
+            alertDiv.style.color = "red"; alertDiv.style.borderColor = "red";
+        }
+    }
+
+    function win() {
+        gameState = 'won'; clearInterval(clock); clearTimeout(eventTimeout);
+        const finalTime = time.toFixed(2);
+        charDiv.innerText = faces.win;
+        alertDiv.style.display = "block";
+        alertDiv.innerText = "CLEAN EXIT! (" + finalTime + "s)";
+        alertDiv.style.color = "var(--main-color)"; alertDiv.style.borderColor = "var(--main-color)";
+        saveRank(finalTime);
+    }
+
+    function resetGame() {
+        pressure = 0; oxygen = 100; time = 0; isPressing = false; isKnocking = false; eventTriggered = false; gameState = 'ready';
+        clearInterval(clock); clearTimeout(eventTimeout);
+        timerDisp.innerText = "00:00.00"; pFill.style.width = "0%"; oFill.style.width = "100%";
+        document.getElementById('p-val').innerText = "0%"; document.getElementById('o-val').innerText = "100%";
+        charDiv.innerText = faces.ready; charDiv.classList.remove('shake');
+        alertDiv.style.display = "none"; gameWrap.classList.remove('busted-bg', 'fainted-bg');
+    }
+
+    // 랭킹 토글 로직
+    const rankToggle = document.getElementById('rank-toggle');
+    const rankContent = document.getElementById('rank-content');
+    rankToggle.addEventListener('pointerdown', (e) => {
+        e.stopPropagation(); // 게임 시작 방지
+        const isHidden = rankContent.style.display === 'none' || rankContent.style.display === '';
+        rankContent.style.display = isHidden ? 'block' : 'none';
+        rankToggle.innerText = isHidden ? '[ HALL OF FAME ] ▴' : '[ HALL OF FAME ] ▾';
+    });
+
+    document.getElementById('btn-retry').addEventListener('pointerdown', (e) => {
+        e.stopPropagation(); // 게임 시작 방지
+        resetGame();
+    });
+
+    function saveRank(t) {
+        let ranks = JSON.parse(localStorage.getItem('poop_ranks') || '[]');
+        ranks.push(parseFloat(t)); ranks.sort((a, b) => a - b);
+        localStorage.setItem('poop_ranks', JSON.stringify(ranks.slice(0, 10)));
+        loadRank();
+    }
+    function loadRank() {
+        const ranks = JSON.parse(localStorage.getItem('poop_ranks') || '[]');
+        document.getElementById('rank-list').innerHTML = ranks.map((r, i) => `<div class="rank-item"><span>#${i+1}</span><span>${r}s</span></div>`).join('') || "No records.";
+    }
+    loadRank();
+</script>
+</body>
+</html>
